@@ -1,0 +1,19 @@
+{
+  "launch_path": "index.html",
+  "default_locale": "en",
+  "activities": {
+    "dhis": { "href": "index.html" }
+  },
+  "type": "app",
+  "name": "Facility Dashboard",
+  "version": "1.0.0",
+  "description": "Facility Dashboard",
+  "developer": {
+    "name": "Padam",
+    "email": "padam.dahal@giz.de",
+    "url": "",
+    "company": ""
+  },
+  "icons": { "48": "img/icon.png" },
+  "manifest_generated_at": ""
+}

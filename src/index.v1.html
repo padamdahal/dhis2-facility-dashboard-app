@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ePHC Dashboard</title>
+<script src="chart.umd.js"></script>
+<style>
+  :root {--ink: #1c2a33;--muted: #5c6b74;--line: #e1e6e9;--bg: #f6f8f9;--card: #ffffff;--accent: #2c6693;--ok: #2e8b57;--err: #c0392b;
+    --warn: #b8860b;}
+  * { box-sizing: border-box; }
+  body {margin: 0;font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;background: var(--bg);color: var(--ink);
+  }
+  header {background: var(--card);border-bottom: 1px solid var(--line);padding: 14px 20px;display: flex;align-items: center;justify-content: space-between;
+    position: sticky;top: 0;z-index: 10;flex-wrap: wrap;gap: 10px;
+  }
+  header .title-group h1 { font-size: 17px; font-weight: 600; margin: 0; }
+  header .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  header .ou-name { font-size: 12px; color: var(--accent); font-weight: 600; margin-top: 2px; }
+  .refresh-btn {background: var(--accent);color: #fff;border: none;padding: 7px 14px;border-radius: 4px; font-size: 13px;cursor: pointer;
+  }
+  .refresh-btn:hover { background: #235275; }
+
+  .tab-bar {max-width: 1200px;margin: 14px auto 0;padding: 0 16px;display: flex;gap: 6px;flex-wrap: wrap;
+    border-bottom: 1px solid var(--line);}
+  .tab-btn {border: none;background: transparent;color: var(--muted);padding: 9px 16px;font-size: 13.5px;font-weight: 600;
+    cursor: pointer;border-bottom: 2px solid transparent;margin-bottom: -1px;}
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn:hover:not(.active) { color: var(--ink); }
+
+  main {max-width: 1200px;margin: 0 auto;padding: 20px;display: flex;flex-direction: column;gap: 20px;}
+  .viz-card {background: var(--card);border: 1px solid var(--line);border-radius: 6px;padding: 16px 18px;}
+  .viz-card-header {display: flex; align-items: baseline; justify-content: space-between;margin-bottom: 12px;flex-wrap: wrap; gap: 6px;
+  }
+  .viz-title { font-size: 14.5px; font-weight: 600; }
+  .viz-meta { font-size: 11.5px; color: var(--muted); }
+
+  .status-badge {display: inline-block;width: 7px; height: 7px;border-radius: 50%;margin-right: 5px;}
+  .status-ok { background: var(--ok); }
+  .status-timeout { background: var(--warn); }
+  .multiples-grid {display: grid;grid-template-columns: repeat(4, 1fr);gap: 10px;}
+  @media (max-width: 900px) {.multiples-grid { grid-template-columns: repeat(2, 1fr); }}
+  .multiple-cell {border: 1px solid var(--line);border-radius: 5px;padding: 8px;
+  }
+  .multiple-cell .cell-label {font-size: 11.5px;font-weight: 600;display: flex;align-items: center;margin-bottom: 4px; }
+  .multiple-cell canvas { max-height: 90px; }
+  .multiple-cell .cell-error {font-size: 11px;color: var(--err);padding: 20px 0;text-align: center;}
+  .scorecard-cell {border: 1px solid var(--line);border-radius: 5px;padding: 10px 8px;text-align: center;}
+  .scorecard-cell .cell-label {font-size: 11.5px;font-weight: 600;justify-content: center;margin-bottom: 6px;}
+  .score-value { font-size: 24px; font-weight: 700; line-height: 1; }
+  .score-unit { font-size: 13px; font-weight: 500; margin-left: 2px; }
+  .score-target { font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+  .orgunit-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  @media (max-width: 900px) {
+    .orgunit-grid { grid-template-columns: repeat(1, 1fr); }
+  }
+  .orgunit-grid-cell {
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 10px;
+  }
+  .orgunit-grid-cell .cell-label {
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .orgunit-chart-wrap { position: relative; width: 100%; height: 160px; }
+  .orgunit-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+  .combined-chart-wrap { position: relative; width: 100%; height: 260px; }
+  .combined-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+  table.viz-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.viz-table th, table.viz-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  table.viz-table th { color: var(--muted); font-weight: 600; }
+  table.viz-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .demo-banner {max-width: 1200px;margin: 14px auto 0; padding: 8px 16px; background: #fff8e6; border: 1px solid #f0dca0; color: #8a6d1a;
+    font-size: 12.5px; border-radius: 4px; }
+  footer { text-align: center; font-size: 11.5px; color: var(--muted); padding: 20px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title-group">
+    <h1>ePHC Dashboard</h1>
+    <div class="sub" id="lastRefreshed">Loading…</div>
+    <div class="ou-name" id="ouName"></div>
+  </div>
+  <div>
+  <a class="refresh-btn" href="../../apps/capture#/?programId=kvottqqHM1j" style="text-decoration:none">Capture App</a>
+  <a class="refresh-btn" href="../../apps/e-record#/?programId=kvottqqHM1j" style="text-decoration:none">eRecord App</a>
+  <button class="refresh-btn" onclick="refreshAll()">Refresh all</button>
+  </div>
+</header>
+
+<div class="tab-bar" id="tabBar"></div>
+
+<div id="demoBanner" class="demo-banner" style="display:none">
+  Datastore/user API not reachable — showing demo data.
+</div>
+
+<main id="dashboard"></main>
+
+<footer>Data updated every hour · scoped automatically to your assigned organisation unit (ou:USER_ORGUNIT)</footer>
+
+<script>
+/*****************************************************************************
+Datastore layout — one namespace, one "tabs" index key, one key per program
+
+namespace: facilityDashboard
+
+  facilityDashboard/tabs
+  ------------------------
+  [
+    { "id": "immunization",   "label": "Immunization",   "key": "immunization" },
+    { "id": "familyPlanning", "label": "Family Planning","key": "familyPlanning" },
+    { "id": "childHealth",    "label": "Child Health",   "key": "childHealth" }
+  ]
+  "key" is the datastore key (within the same facilityDashboard namespace)
+  that holds that tab's own visualizations. Add a program by adding one
+  entry here plus one new datastore key — no code changes needed.
+
+  facilityDashboard/immunization  (facilityDashboard/<tab.key> in general)
+  ------------------------
+  {
+    "visualizations": [
+      {
+        "id": "bcg-doses",
+        "label": "BCG Doses Given (this year)",
+        "type": "bar",           // bar | line | table | scorecard | small-multiples | orgunit-grid
+        "xAxis": "pe",            // ou | pe | dx  (default: "ou")
+        "dataUrl": "analytics.json?dimension=dx:xxxx&dimension=pe:THIS_YEAR&dimension=ou:USER_ORGUNIT",
+        "unit": "doses",
+        "target": 80              // optional, scorecard only
+      }
+    ]
+  }
+  Every tab's visualizations follow this exact same shape — only the
+  dataUrl's dx/pe (and viz choices) differ per program.
+
+There is NO org-unit picker, no district/facility breakdown, and no
+client-side org-unit-level logic in this app at all. Every dataUrl simply
+uses DHIS2's built-in "ou:USER_ORGUNIT" (or USER_ORGUNIT_CHILDREN /
+USER_ORGUNIT_GRANDCHILDREN, if a config author wants one level of
+breakdown for a specific visualization) which the DHIS2 analytics API
+resolves server-side to whichever org unit(s) the logged-in user is
+assigned to. This app never needs to know the user's org unit id, level,
+or hierarchy position — it only fetches /api/me.json once, to show the
+org unit's name in the header.
+
+xAxis keeps its usual meaning:
+"ou" — one category per org unit returned (normally just the user's own;
+       more than one only if USER_ORGUNIT_CHILDREN/GRANDCHILDREN is used)
+"pe" — one category per period, summed across whatever org unit(s) came back
+"dx" — one category per data item, summed across whatever org unit(s) came back
+****************************************************/
+const DATASTORE_NAMESPACE = "facilityDashboard";
+const TABS_KEY = "tabs";
+
+async function fetchDatastoreKey(key) {
+  const res = await fetch(`../../../api/dataStore/${DATASTORE_NAMESPACE}/${key}`);
+  if (!res.ok) throw new Error(`datastore ${key} ${res.status}`);
+  return await res.json();
+}
+
+async function fetchUserOrgUnitName() {
+  const res = await fetch(`../../../api/me.json?fields=organisationUnits[name]`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  const names = (json.organisationUnits || []).map(ou => ou.name);
+  return names.join(", ") || null;
+}
+
+// ---- generic analytics.json row parser ----
+function parseAnalyticsRows(json) {
+  const headers = json.headers || [];
+  const idx = name => headers.findIndex(h => h.name === name);
+  const dxIdx = idx("dx"), peIdx = idx("pe"), ouIdx = idx("ou"), valueIdx = idx("value");
+  const items = (json.metaData && json.metaData.items) || {};
+  const labelOf = code => (items[code] && items[code].name) || code;
+
+  return (json.rows || []).map(r => ({
+    dx: dxIdx > -1 ? r[dxIdx] : null,
+    dxLabel: dxIdx > -1 ? labelOf(r[dxIdx]) : null,
+    pe: peIdx > -1 ? r[peIdx] : null,
+    peLabel: peIdx > -1 ? labelOf(r[peIdx]) : null,
+    ou: ouIdx > -1 ? r[ouIdx] : null,
+    ouLabel: ouIdx > -1 ? labelOf(r[ouIdx]) : null,
+    value: valueIdx > -1 ? parseFloat(r[valueIdx]) : null
+  }));
+}
+
+// ---- group a single analytics response's rows into per-org-unit buckets ----
+// (normally resolves to just one bucket — the user's own org unit — but
+// stays generic in case a viz uses USER_ORGUNIT_CHILDREN/GRANDCHILDREN)
+function groupRowsByOu(rows) {
+  const map = new Map();
+  rows.forEach(row => {
+    if (row.ou == null) return;
+    if (!map.has(row.ou)) map.set(row.ou, { orgUnit: row.ouLabel || row.ou, status: "ok", rows: [] });
+    map.get(row.ou).rows.push(row);
+  });
+  return [...map.values()].sort((a, b) => a.orgUnit.localeCompare(b.orgUnit));
+}
+
+// ---- fetch one visualization; dataUrl already has ou:USER_ORGUNIT baked in ----
+async function fetchViz(viz) {
+  const res = await fetch(`../../../api/${viz.dataUrl}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  return groupRowsByOu(parseAnalyticsRows(json));
+}
+
+// ---- sum a set of rows into sorted {label, value} points, grouped by dx or pe ----
+function sumRowsByKey(rows, keyField, labelField) {
+  const sums = new Map();
+  rows.forEach(row => {
+    const key = row[keyField];
+    if (key == null) return;
+    if (!sums.has(key)) sums.set(key, { label: row[labelField] || key, total: 0 });
+    sums.get(key).total += (row.value || 0);
+  });
+  const sortedKeys = [...sums.keys()].sort();
+  return sortedKeys.map(k => ({
+    label: sums.get(k).label,
+    value: Math.round(sums.get(k).total * 100) / 100
+  }));
+}
+
+// ---- turn per-org-unit rows into chart-ready categories, per xAxis choice ----
+function aggregate(viz, results) {
+  const xAxis = viz.xAxis || "ou";
+
+  if (xAxis === "ou") {
+    const categories = results.map(r => {
+      const total = r.rows.reduce((s, row) => s + (row.value || 0), 0);
+      return { label: r.orgUnit, value: Math.round(total * 100) / 100 };
+    });
+    return { categories };
+  }
+
+  const keyField = xAxis === "pe" ? "pe" : "dx";
+  const labelField = xAxis === "pe" ? "peLabel" : "dxLabel";
+  const allRows = results.flatMap(r => r.rows);
+  return { categories: sumRowsByKey(allRows, keyField, labelField) };
+}
+
+function axisLabel(xAxis) {
+  if (xAxis === "pe") return "Period";
+  if (xAxis === "dx") return "Data item";
+  return "Org unit";
+}
+
+// ---- demo fallback (used when datastore/me.json aren't reachable) ----
+/*const DEMO_ORGUNIT_NAME = "Sundhara PHC";
+
+const DEMO_TABS = [
+  { id: "immunization", label: "Immunization" },
+  { id: "familyPlanning", label: "Family Planning" },
+  { id: "childHealth", label: "Child Health" }
+];
+
+const DEMO_VISUALIZATIONS_BY_TAB = {
+  immunization: [
+    { id: "imm-doses-by-type", label: "Vaccine Doses by Type (this year)", type: "bar", xAxis: "dx", unit: "doses" },
+    { id: "imm-bcg-trend", label: "BCG Doses — Monthly Trend", type: "line", xAxis: "pe", unit: "doses" },
+    { id: "imm-penta3-coverage", label: "Penta3 Coverage", type: "scorecard", xAxis: "ou", unit: "%", target: 90 },
+    { id: "imm-doses-table", label: "Doses Given, All Antigens", type: "table", xAxis: "dx", unit: "doses" }
+  ],
+  familyPlanning: [
+    { id: "fp-clients-by-method", label: "Clients by FP Method (this year)", type: "bar", xAxis: "dx", unit: "clients" },
+    { id: "fp-new-acceptors-trend", label: "New Acceptors — Monthly Trend", type: "line", xAxis: "pe", unit: "clients" },
+    { id: "fp-cpr", label: "Contraceptive Prevalence Rate", type: "scorecard", xAxis: "ou", unit: "%", target: 55 }
+  ],
+  childHealth: [
+    { id: "child-underweight-trend", label: "Underweight Children — Monthly Trend", type: "line", xAxis: "pe", unit: "children" },
+    { id: "child-ors-zinc", label: "ORS &amp; Zinc Given for Diarrhoea (this year)", type: "bar", xAxis: "dx", unit: "children" },
+    { id: "child-ebf-rate", label: "Exclusive Breastfeeding Rate (&lt;6mo)", type: "scorecard", xAxis: "ou", unit: "%", target: 70 }
+  ]
+};
+
+// deterministic pseudo-random in [0,1) so demo numbers are stable across refreshes
+function seededRandom(seed) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return (h % 10000) / 10000;
+}
+
+function buildDemoRows(vizId) {
+  if (vizId === "imm-doses-by-type" || vizId === "imm-doses-table") {
+    const antigens = [
+      { dx: "bcg", dxLabel: "BCG" }, { dx: "opv3", dxLabel: "OPV3" },
+      { dx: "penta3", dxLabel: "Penta3" }, { dx: "mr1", dxLabel: "Measles-Rubella 1" }
+    ];
+    const base = [420, 380, 400, 340];
+    return antigens.map((a, i) => ({ ...a, pe: "2026", peLabel: "2026", value: Math.round(base[i] * (0.7 + seededRandom(vizId + a.dx) * 0.6)) }));
+  }
+  if (vizId === "imm-bcg-trend") {
+    return Array.from({ length: 12 }, (_, m) => ({
+      pe: "2026" + String(m + 1).padStart(2, "0"), peLabel: "2026" + String(m + 1).padStart(2, "0"),
+      dx: "bcg", dxLabel: "BCG",
+      value: Math.round(30 + Math.sin(m / 2) * 8 + seededRandom(vizId + m) * 6)
+    }));
+  }
+  if (vizId === "imm-penta3-coverage") {
+    return [{ pe: "2026", peLabel: "2026", dx: "penta3cov", dxLabel: "Penta3 coverage", value: Math.round(70 + seededRandom(vizId) * 25) }];
+  }
+  if (vizId === "fp-clients-by-method") {
+    const methods = [
+      { dx: "condom", dxLabel: "Condoms" }, { dx: "pills", dxLabel: "Oral pills" },
+      { dx: "injectable", dxLabel: "Injectable" }, { dx: "implant", dxLabel: "Implant" }
+    ];
+    const base = [180, 140, 210, 90];
+    return methods.map((m, i) => ({ ...m, pe: "2026", peLabel: "2026", value: Math.round(base[i] * (0.7 + seededRandom(vizId + m.dx) * 0.6)) }));
+  }
+  if (vizId === "fp-new-acceptors-trend") {
+    return Array.from({ length: 12 }, (_, m) => ({
+      pe: "2026" + String(m + 1).padStart(2, "0"), peLabel: "2026" + String(m + 1).padStart(2, "0"),
+      dx: "newacceptors", dxLabel: "New acceptors",
+      value: Math.round(20 + Math.cos(m / 2) * 6 + seededRandom(vizId + m) * 5)
+    }));
+  }
+  if (vizId === "fp-cpr") {
+    return [{ pe: "2026", peLabel: "2026", dx: "cpr", dxLabel: "CPR", value: Math.round(40 + seededRandom(vizId) * 30) }];
+  }
+  if (vizId === "child-underweight-trend") {
+    return Array.from({ length: 12 }, (_, m) => ({
+      pe: "2026" + String(m + 1).padStart(2, "0"), peLabel: "2026" + String(m + 1).padStart(2, "0"),
+      dx: "underweight", dxLabel: "Underweight",
+      value: Math.round(8 + Math.sin(m / 3) * 3 + seededRandom(vizId + m) * 2)
+    }));
+  }
+  if (vizId === "child-ors-zinc") {
+    const items = [{ dx: "ors", dxLabel: "ORS" }, { dx: "zinc", dxLabel: "Zinc" }];
+    const base = [260, 240];
+    return items.map((it, i) => ({ ...it, pe: "2026", peLabel: "2026", value: Math.round(base[i] * (0.7 + seededRandom(vizId + it.dx) * 0.6)) }));
+  }
+  if (vizId === "child-ebf-rate") {
+    return [{ pe: "2026", peLabel: "2026", dx: "ebf", dxLabel: "EBF", value: Math.round(55 + seededRandom(vizId) * 35) }];
+  }
+  return [];
+}
+
+function fetchVizDemo(viz) {
+  return [{ orgUnit: DEMO_ORGUNIT_NAME, status: "ok", rows: buildDemoRows(viz.id) }];
+}*/
+
+// ---- Renderers ----
+function renderBar(viz, agg) {
+  const card = document.createElement("div");
+  card.className = "viz-card";
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · x-axis: ${viz.xAxis || "ou"}</div>
+    </div>
+    <div class="combined-chart-wrap"><canvas></canvas></div>
+  `;
+  new Chart(card.querySelector("canvas"), {
+    type: "bar",
+    data: {
+      labels: agg.categories.map(c => c.label),
+      datasets: [{ label: viz.label, data: agg.categories.map(c => c.value), backgroundColor: "#2c6693" }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, title: { display: true, text: viz.unit } } }
+    }
+  });
+  return card;
+}
+
+function renderLine(viz, agg) {
+  const card = document.createElement("div");
+  card.className = "viz-card";
+  const summed = viz.xAxis === "pe" || viz.xAxis === "dx";
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · x-axis: ${viz.xAxis || "ou"}${summed ? " · summed across returned org unit(s)" : ""}</div>
+    </div>
+    <div class="combined-chart-wrap"><canvas></canvas></div>
+  `;
+  new Chart(card.querySelector("canvas"), {
+    type: "line",
+    data: {
+      labels: agg.categories.map(c => c.label),
+      datasets: [{
+        label: viz.label,
+        data: agg.categories.map(c => c.value),
+        borderColor: "#2c6693",
+        backgroundColor: "transparent",
+        pointRadius: 0,
+        tension: 0.25
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10 } },
+        y: { beginAtZero: true, title: { display: true, text: viz.unit } }
+      }
+    }
+  });
+  return card;
+}
+
+function renderTable(viz, agg) {
+  const card = document.createElement("div");
+  card.className = "viz-card";
+  const rows = agg.categories.map(c => `
+    <tr>
+      <td><span class="status-badge status-ok"></span>${c.label}</td>
+      <td class="num">${c.value} ${viz.unit || ""}</td>
+    </tr>`).join("");
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · x-axis: ${viz.xAxis || "ou"}</div>
+    </div>
+    <table class="viz-table">
+      <thead><tr><th>${axisLabel(viz.xAxis)}</th><th style="text-align:right">Value</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+  return card;
+}
+
+function renderScorecards(viz, agg) {
+  const card = document.createElement("div");
+  card.className = "viz-card";
+  const cells = agg.categories.map(c => {
+    const hasTarget = viz.target != null;
+    const metTarget = hasTarget && c.value >= viz.target;
+    const scoreColor = hasTarget ? (metTarget ? "var(--ok)" : "var(--warn)") : "var(--ink)";
+    return `
+      <div class="scorecard-cell">
+        <div class="cell-label"><span class="status-badge status-ok"></span>${c.label}</div>
+        <div class="score-value" style="color:${scoreColor}">${c.value}<span class="score-unit">${viz.unit || ""}</span></div>
+        ${hasTarget ? `<div class="score-target">target ${viz.target}${viz.unit || ""}</div>` : ""}
+      </div>`;
+  }).join("");
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id}${viz.target != null ? " · scorecard vs. target" : " · scorecard"}</div>
+    </div>
+    <div class="multiples-grid">${cells}</div>
+  `;
+  return card;
+}
+
+function renderSmallMultiples(viz, results) {
+  const card = document.createElement("div");
+  card.className = "viz-card";
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · small multiples</div>
+    </div>
+    <div class="multiples-grid"></div>
+  `;
+  const grid = card.querySelector(".multiples-grid");
+  results.forEach(r => {
+    const cell = document.createElement("div");
+    cell.className = "multiple-cell";
+    if (!r.rows.length) {
+      cell.innerHTML = `<div class="cell-label"><span class="status-badge status-timeout"></span>${r.orgUnit}</div><div class="cell-error">No data</div>`;
+      grid.appendChild(cell);
+      return;
+    }
+    const sorted = [...r.rows].sort((a, b) => String(a.pe).localeCompare(String(b.pe)));
+    cell.innerHTML = `<div class="cell-label"><span class="status-badge status-ok"></span>${r.orgUnit}</div><canvas></canvas>`;
+    grid.appendChild(cell);
+    new Chart(cell.querySelector("canvas"), {
+      type: "line",
+      data: { labels: sorted.map((_, i) => i + 1), datasets: [{ data: sorted.map(row => row.value), borderColor: "#2c6693", pointRadius: 0, tension: 0.3 }] },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
+    });
+  });
+  return card;
+}
+
+function renderOrgUnitGrid(viz, results) {
+  const card = document.createElement("div");
+  card.className = "viz-card";
+  const chartStyle = viz.chartStyle === "line" ? "line" : "bar";
+  const keyField = viz.xAxis === "dx" ? "dx" : "pe";
+  const labelField = keyField === "dx" ? "dxLabel" : "peLabel";
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · per-org-unit ${chartStyle} chart, x-axis: ${keyField}</div>
+    </div>
+    <div class="orgunit-grid"></div>
+  `;
+  const grid = card.querySelector(".orgunit-grid");
+  results.forEach(r => {
+    const cell = document.createElement("div");
+    cell.className = "orgunit-grid-cell";
+    if (!r.rows.length) {
+      cell.innerHTML = `<div class="cell-label"><span class="status-badge status-timeout"></span>${r.orgUnit}</div><div class="cell-error">No data</div>`;
+      grid.appendChild(cell);
+      return;
+    }
+    const points = sumRowsByKey(r.rows, keyField, labelField);
+    cell.innerHTML = `<div class="cell-label"><span class="status-badge status-ok"></span>${r.orgUnit}</div><div class="orgunit-chart-wrap"><canvas></canvas></div>`;
+    grid.appendChild(cell);
+    new Chart(cell.querySelector("canvas"), {
+      type: chartStyle,
+      data: {
+        labels: points.map(p => p.label),
+        datasets: [{ data: points.map(p => p.value), backgroundColor: chartStyle === "bar" ? "#2c6693" : "transparent", borderColor: "#2c6693", pointRadius: 0, tension: 0.25 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+        scales: { x: { ticks: { maxTicksLimit: 6, font: { size: 9 } } }, y: { beginAtZero: true, ticks: { font: { size: 9 } }, title: { display: !!viz.unit, text: viz.unit, font: { size: 9 } } } }
+      }
+    });
+  });
+  return card;
+}
+
+function cardFor(viz, results) {
+  if (viz.type === "small-multiples") return renderSmallMultiples(viz, results);
+  if (viz.type === "orgunit-grid") return renderOrgUnitGrid(viz, results);
+  const agg = aggregate(viz, results);
+  if (viz.type === "bar") return renderBar(viz, agg);
+  if (viz.type === "line") return renderLine(viz, agg);
+  if (viz.type === "scorecard") return renderScorecards(viz, agg);
+  return renderTable(viz, agg);
+}
+
+function loadingCard(viz) {
+  const card = document.createElement("div");
+  card.className = "viz-card";
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · loading…</div>
+    </div>
+    <div class="cell-error" style="color:var(--muted)">Fetching…</div>
+  `;
+  return card;
+}
+
+// ---- app state ----
+let tabs = [];
+let activeTabId = null;
+let usingDemo = false;
+const tabConfigCache = new Map();
+
+const tabBar = document.getElementById("tabBar");
+const dashboard = document.getElementById("dashboard");
+const banner = document.getElementById("demoBanner");
+
+function renderTabs() {
+  tabBar.innerHTML = tabs.map(t =>
+    `<button class="tab-btn ${t.id === activeTabId ? "active" : ""}" data-tab="${t.id}">${t.label}</button>`
+  ).join("");
+  tabBar.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activeTabId = btn.dataset.tab;
+      renderTabs();
+      loadAndRenderActiveTab();
+    });
+  });
+}
+
+async function loadTabConfig(tab) {
+  if (tabConfigCache.has(tab.id)) return tabConfigCache.get(tab.id);
+  let config;
+  if (usingDemo) {
+    config = { visualizations: DEMO_VISUALIZATIONS_BY_TAB[tab.id] || [] };
+  } else {
+    try {
+      const raw = await fetchDatastoreKey(tab.key);
+      // Accept either { "visualizations": [...] } or a bare array of visualizations.
+      const visualizations = Array.isArray(raw) ? raw
+        : (raw && Array.isArray(raw.visualizations)) ? raw.visualizations
+        : null;
+      if (!visualizations) throw new Error(`key "${tab.key}" has no visualizations array`);
+      config = { visualizations };
+    } catch (e) {
+      console.warn(`Falling back to demo visualizations for tab "${tab.id}":`, e.message);
+      config = { visualizations: DEMO_VISUALIZATIONS_BY_TAB[tab.id] || [] };
+    }
+  }
+  tabConfigCache.set(tab.id, config);
+  return config;
+}
+
+async function loadAndRenderActiveTab() {
+  const tab = tabs.find(t => t.id === activeTabId);
+  dashboard.innerHTML = "";
+  if (!tab) return;
+
+  const config = await loadTabConfig(tab);
+  for (const viz of config.visualizations) {
+    const placeholder = loadingCard(viz);
+    dashboard.appendChild(placeholder);
+    try {
+      const results = usingDemo ? fetchVizDemo(viz) : await fetchViz(viz);
+      placeholder.replaceWith(cardFor(viz, results));
+    } catch (e) {
+      placeholder.querySelector(".viz-meta").textContent = `${viz.id} · failed to load`;
+      placeholder.querySelector(".cell-error").textContent = `Error: ${e.message}`;
+      placeholder.querySelector(".cell-error").style.color = "var(--err)";
+    }
+  }
+  document.getElementById("lastRefreshed").textContent = `Last Updated: ${String(new Date().getHours()).padStart(2, '0')}:00`; //new Date().toLocaleTimeString();
+}
+
+async function refreshAll() {
+  tabConfigCache.clear();
+  await loadAndRenderActiveTab();
+}
+
+async function start() {
+  try {
+    const name = await fetchUserOrgUnitName();
+    if (!name) throw new Error("no organisation unit assigned to this user");
+    document.getElementById("ouName").textContent = name;
+  } catch (e) {
+    console.warn("Falling back to demo org unit name:", e.message);
+    document.getElementById("ouName").textContent = DEMO_ORGUNIT_NAME + " (demo)";
+  }
+
+  try {
+    const tabsConfig = await fetchDatastoreKey(TABS_KEY);
+    // Accept either a bare array, or a { "tabs": [...] } wrapper — both are
+    // easy to end up with depending on how the key was POSTed/PUT.
+    const tabsArray = Array.isArray(tabsConfig) ? tabsConfig
+      : (tabsConfig && Array.isArray(tabsConfig.tabs)) ? tabsConfig.tabs
+      : null;
+    if (!tabsArray || !tabsArray.length) throw new Error("no tabs configured");
+    usingDemo = false;
+    tabs = tabsArray;
+  } catch (e) {
+    console.warn("Falling back to demo tabs:", e.message);
+    usingDemo = true;
+    tabs = DEMO_TABS;
+  }
+  banner.style.display = usingDemo ? "block" : "none";
+
+  activeTabId = tabs[0].id;
+  renderTabs();
+  await loadAndRenderActiveTab();
+}
+
+start();
+</script>
+</body>
+</html>

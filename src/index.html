@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ePHC Dashboard — My Facility</title>
+<script src="chart.umd.js"></script>
+<style>
+  :root {--ink: #1c2a33;--muted: #5c6b74;--line: #e1e6e9;--bg: #f6f8f9;--card: #ffffff;--accent: #2c6693;--ok: #2e8b57;--err: #c0392b;
+    --warn: #b8860b;}
+  * { box-sizing: border-box; }
+  body {margin: 0;font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;background: var(--bg);color: var(--ink);
+  }
+  header {background: var(--card);border-bottom: 1px solid var(--line);padding: 14px 20px;display: flex;align-items: center;justify-content: space-between;
+    position: sticky;top: 0;z-index: 10;flex-wrap: wrap;gap: 10px;
+  }
+  header .title-group h1 { font-size: 17px; font-weight: 600; margin: 0; }
+  header .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  header .ou-name { font-size: 12px; color: var(--accent); font-weight: 600; margin-top: 2px; }
+  .refresh-btn {background: var(--accent);color: #fff;border: none;padding: 7px 14px;border-radius: 4px; font-size: 13px;cursor: pointer;
+  }
+  .refresh-btn:hover { background: #235275; }
+
+  .tab-bar {max-width: 1200px;margin: 14px auto 0;padding: 0 16px;display: flex;gap: 6px;flex-wrap: wrap;
+    border-bottom: 1px solid var(--line);}
+  .tab-btn {border: none;background: transparent;color: var(--muted);padding: 9px 16px;font-size: 13.5px;font-weight: 600;
+    cursor: pointer;border-bottom: 2px solid transparent;margin-bottom: -1px;}
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn:hover:not(.active) { color: var(--ink); }
+
+  main {max-width: 1200px;margin: 0 auto;padding: 20px;display: flex;flex-direction: column;gap: 20px;}
+  .viz-card {background: var(--card);border: 1px solid var(--line);border-radius: 6px;padding: 16px 18px;}
+  .viz-card-header {display: flex; align-items: baseline; justify-content: space-between;margin-bottom: 12px;flex-wrap: wrap; gap: 6px;
+  }
+  .viz-title { font-size: 14.5px; font-weight: 600; }
+  .viz-meta { font-size: 11.5px; color: var(--muted); }
+
+  .status-badge {display: inline-block;width: 7px; height: 7px;border-radius: 50%;margin-right: 5px;}
+  .status-ok { background: var(--ok); }
+  .status-timeout { background: var(--warn); }
+  .multiples-grid {display: grid;grid-template-columns: repeat(4, 1fr);gap: 10px;}
+  @media (max-width: 900px) {.multiples-grid { grid-template-columns: repeat(2, 1fr); }}
+  .multiple-cell {border: 1px solid var(--line);border-radius: 5px;padding: 8px;
+  }
+  .multiple-cell .cell-label {font-size: 11.5px;font-weight: 600;display: flex;align-items: center;margin-bottom: 4px; }
+  .multiple-cell canvas { max-height: 90px; }
+  .multiple-cell .cell-error {font-size: 11px;color: var(--err);padding: 20px 0;text-align: center;}
+  .scorecard-cell {border: 1px solid var(--line);border-radius: 5px;padding: 10px 8px;text-align: center;}
+  .scorecard-cell .cell-label {font-size: 11.5px;font-weight: 600;justify-content: center;margin-bottom: 6px;}
+  .score-value { font-size: 24px; font-weight: 700; line-height: 1; }
+  .score-unit { font-size: 13px; font-weight: 500; margin-left: 2px; }
+  .score-target { font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+  .orgunit-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  @media (max-width: 900px) {
+    .orgunit-grid { grid-template-columns: repeat(1, 1fr); }
+  }
+  .orgunit-grid-cell {
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 10px;
+  }
+  .orgunit-grid-cell .cell-label {
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .orgunit-chart-wrap { position: relative; width: 100%; height: 160px; }
+  .orgunit-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+  .combined-chart-wrap { position: relative; width: 100%; height: 260px; }
+  .combined-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+  table.viz-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.viz-table th, table.viz-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  table.viz-table th { color: var(--muted); font-weight: 600; }
+  table.viz-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .demo-banner {max-width: 1200px;margin: 14px auto 0; padding: 8px 16px; background: #fff8e6; border: 1px solid #f0dca0; color: #8a6d1a;
+    font-size: 12.5px; border-radius: 4px; }
+  footer { text-align: center; font-size: 11.5px; color: var(--muted); padding: 20px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title-group">
+    <h1>ePHC Dashboard — My Facility</h1>
+    <div class="sub" id="lastRefreshed">Loading…</div>
+    <div class="ou-name" id="ouName"></div>
+  </div>
+  <button class="refresh-btn" onclick="refreshAll()">Refresh all</button>
+</header>
+
+<div class="tab-bar" id="tabBar"></div>
+
+<div id="demoBanner" class="demo-banner" style="display:none">
+  Datastore/user API not reachable — showing demo data.
+</div>
+
+<main id="dashboard"></main>
+
+<footer>Data updated every hour · scoped automatically to your assigned organisation unit (ou:USER_ORGUNIT)</footer>
+
+<script>
+/*****************************************************************************
+Datastore layout — one namespace, one "tabs" index key, one key per program
+
+namespace: facilityDashboard
+
+  facilityDashboard/tabs
+  ------------------------
+  [
+    { "id": "immunization",   "label": "Immunization",   "key": "immunization" },
+    { "id": "familyPlanning", "label": "Family Planning","key": "familyPlanning" },
+    { "id": "childHealth",    "label": "Child Health",   "key": "childHealth" }
+  ]
+  "key" is the datastore key (within the same facilityDashboard namespace)
+  that holds that tab's own visualizations. Add a program by adding one
+  entry here plus one new datastore key — no code changes needed.
+
+  facilityDashboard/immunization  (facilityDashboard/<tab.key> in general)
+  ------------------------
+  {
+    "visualizations": [
+      {
+        "id": "bcg-doses",
+        "label": "BCG Doses Given (this year)",
+        "type": "bar",           // bar | line | pie | stacked | table | scorecard | small-multiples | orgunit-grid
+        "source": "aggregate",    // "aggregate" (default) | "event" — which analytics endpoint/response shape dataUrl returns
+        "xAxis": "pe",            // aggregate: ou | pe | dx (default "ou") · event: category | pe (default "category")
+        "seriesField": "dx",      // stacked only: which field becomes the stacked segments (ou|pe|dx for aggregate, category|pe for event)
+        "categoryField": "yifOETNxcrj", // event only: header/dimension UID holding the breakdown value; omit to auto-detect
+        "dataUrl": "analytics.json?dimension=dx:xxxx&dimension=pe:THIS_YEAR&dimension=ou:USER_ORGUNIT",
+        "unit": "doses",
+        "target": 80              // optional, scorecard only
+      }
+    ]
+  }
+  Every tab's visualizations follow this exact same shape — only the
+  dataUrl's dx/pe (and viz choices) differ per program.
+
+There is NO org-unit picker, no district/facility breakdown, and no
+client-side org-unit-level logic in this app at all. Every dataUrl simply
+uses DHIS2's built-in "ou:USER_ORGUNIT" (or USER_ORGUNIT_CHILDREN /
+USER_ORGUNIT_GRANDCHILDREN, if a config author wants one level of
+breakdown for a specific visualization) which the DHIS2 analytics API
+resolves server-side to whichever org unit(s) the logged-in user is
+assigned to. This app never needs to know the user's org unit id, level,
+or hierarchy position — it only fetches /api/me.json once, to show the
+org unit's name in the header.
+
+TWO DATA SOURCES per visualization ("source" field, default "aggregate"):
+
+  "aggregate" — the regular analytics.json endpoint (dx/pe/ou/value rows),
+  same as v1. xAxis meaning:
+    "ou" — one category per org unit returned (normally just the user's
+           own; more than one only if USER_ORGUNIT_CHILDREN/GRANDCHILDREN)
+    "pe" — one category per period, summed across returned org unit(s)
+    "dx" — one category per data item, summed across returned org unit(s)
+
+  "event" — the Event Visualizer endpoint,
+  analytics/events/aggregate/<program>.json?dimension=<UID>&dimension=pe:...
+  &filter=ou:USER_ORGUNIT&stage=<UID>&displayProperty=NAME&outputType=EVENT
+  &sortOrder=DESC&outputIdScheme=NAME
+  Its response has one header column per requested dimension (named by
+  UID, e.g. a tracked-entity-attribute or data element UID like a "GEN -
+  Ethnic Code" option-set field) instead of fixed dx/pe/ou columns, plus
+  "pe" and "value". "categoryField" tells this app which header holds
+  that breakdown value ("yifOETNxcrj" in the example above); if omitted,
+  the first header that isn't "pe"/"value"/"ou" is used automatically.
+  xAxis meaning:
+    "category" (default) — one category per breakdown value (e.g. per
+                ethnicity), summed across periods
+    "pe"       — one category per period, summed across breakdown values
+  ou is a "filter", not a "dimension", for event queries (a single fixed
+  org unit, same USER_ORGUNIT-driven pattern as aggregate queries) so it
+  never appears as its own header/category here.
+
+CHART TYPES: bar/line/table/scorecard/small-multiples/orgunit-grid work
+exactly as in v1, for either source. Two additions, also source-agnostic:
+  "pie"     — one slice per category (from the same xAxis/categories
+              aggregate() already produces for bar/line/table). Optional
+              "pieStyle": "pie" (default) or "doughnut".
+  "stacked" — a stacked bar chart needing TWO fields instead of one:
+              "xAxis" (the groups along the bottom) and "seriesField"
+              (what gets stacked within each group), e.g. xAxis:"pe" +
+              seriesField:"dx" for "doses per month, stacked by antigen",
+              or xAxis:"pe" + seriesField:"category" for "ANC clients per
+              month, stacked by ethnicity". Defaults to xAxis:"pe" +
+              seriesField: "dx" (aggregate) / "category" (event) if
+              unspecified.
+****************************************************/
+const DATASTORE_NAMESPACE = "facilityDashboard";
+const TABS_KEY = "tabs";
+
+async function fetchDatastoreKey(key) {
+  const res = await fetch(`../../../api/dataStore/${DATASTORE_NAMESPACE}/${key}`);
+  if (!res.ok) throw new Error(`datastore ${key} ${res.status}`);
+  return await res.json();
+}
+
+const CHART_PALETTE = ["#2c6693", "#5b9bd5", "#7cb9e8", "#3d8361", "#e07a5f", "#f2cc8f", "#81b29a", "#b56576", "#9c89b8", "#f4a261"];
+
+async function fetchUserOrgUnitName() {
+  const res = await fetch(`../../../api/me.json?fields=organisationUnits[name]`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  const names = (json.organisationUnits || []).map(ou => ou.name);
+  return names.join(", ") || null;
+}
+
+// ---- generic analytics.json row parser ----
+function parseAnalyticsRows(json) {
+  const headers = json.headers || [];
+  const idx = name => headers.findIndex(h => h.name === name);
+  const dxIdx = idx("dx"), peIdx = idx("pe"), ouIdx = idx("ou"), valueIdx = idx("value");
+  const items = (json.metaData && json.metaData.items) || {};
+  const labelOf = code => (items[code] && items[code].name) || code;
+
+  return (json.rows || []).map(r => ({
+    dx: dxIdx > -1 ? r[dxIdx] : null,
+    dxLabel: dxIdx > -1 ? labelOf(r[dxIdx]) : null,
+    pe: peIdx > -1 ? r[peIdx] : null,
+    peLabel: peIdx > -1 ? labelOf(r[peIdx]) : null,
+    ou: ouIdx > -1 ? r[ouIdx] : null,
+    ouLabel: ouIdx > -1 ? labelOf(r[ouIdx]) : null,
+    value: valueIdx > -1 ? parseFloat(r[valueIdx]) : null
+  }));
+}
+
+// ---- Event Visualizer row parser: analytics/events/aggregate/<program>.json ----
+// Headers here are named by dimension UID (e.g. a TEA/data element like
+// "yifOETNxcrj") instead of fixed dx/pe/ou columns, plus "pe" and "value".
+// ou is a filter (single fixed org unit), so it never appears as a header.
+function parseEventAnalyticsRows(json, categoryField) {
+  const headers = json.headers || [];
+  const items = (json.metaData && json.metaData.items) || {};
+  const labelOf = code => (items[code] && items[code].name) || code;
+
+  const valueIdx = headers.findIndex(h => h.name === "value");
+  const peIdx = headers.findIndex(h => h.name === "pe");
+  let catIdx = categoryField != null ? headers.findIndex(h => h.name === categoryField) : -1;
+  if (catIdx === -1) {
+    catIdx = headers.findIndex(h => h.name !== "pe" && h.name !== "value" && h.name !== "ou");
+  }
+
+  return (json.rows || []).map(r => ({
+    category: catIdx > -1 ? r[catIdx] : null,
+    categoryLabel: catIdx > -1 ? labelOf(r[catIdx]) : null,
+    pe: peIdx > -1 ? r[peIdx] : null,
+    peLabel: peIdx > -1 ? labelOf(r[peIdx]) : null,
+    value: valueIdx > -1 ? parseFloat(r[valueIdx]) : null
+  }));
+}
+
+// ---- maps an xAxis/seriesField key to the row field names that hold it ----
+function fieldNamesFor(key) {
+  if (key === "pe") return { field: "pe", labelField: "peLabel" };
+  if (key === "dx") return { field: "dx", labelField: "dxLabel" };
+  if (key === "ou") return { field: "ou", labelField: "ouLabel" };
+  return { field: "category", labelField: "categoryLabel" }; // "category" (event source)
+}
+
+
+// (normally resolves to just one bucket — the user's own org unit — but
+// stays generic in case a viz uses USER_ORGUNIT_CHILDREN/GRANDCHILDREN)
+function groupRowsByOu(rows) {
+  const map = new Map();
+  rows.forEach(row => {
+    if (row.ou == null) return;
+    if (!map.has(row.ou)) map.set(row.ou, { orgUnit: row.ouLabel || row.ou, status: "ok", rows: [] });
+    map.get(row.ou).rows.push(row);
+  });
+  return [...map.values()].sort((a, b) => a.orgUnit.localeCompare(b.orgUnit));
+}
+
+// ---- fetch one visualization; dataUrl already has ou:USER_ORGUNIT (or filter=ou:USER_ORGUNIT) baked in ----
+async function fetchViz(viz) {
+  const res = await fetch(`../../../api/${viz.dataUrl}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  if (viz.source === "event") {
+    const rows = parseEventAnalyticsRows(json, viz.categoryField);
+    return [{ orgUnit: "Selected org unit", status: "ok", rows }];
+  }
+  return groupRowsByOu(parseAnalyticsRows(json));
+}
+
+// ---- sum a set of rows into sorted {label, value} points, grouped by dx or pe ----
+function sumRowsByKey(rows, keyField, labelField) {
+  const sums = new Map();
+  rows.forEach(row => {
+    const key = row[keyField];
+    if (key == null) return;
+    if (!sums.has(key)) sums.set(key, { label: row[labelField] || key, total: 0 });
+    sums.get(key).total += (row.value || 0);
+  });
+  const sortedKeys = [...sums.keys()].sort();
+  return sortedKeys.map(k => ({
+    label: sums.get(k).label,
+    value: Math.round(sums.get(k).total * 100) / 100
+  }));
+}
+
+// ---- turn per-org-unit rows into chart-ready categories, per xAxis choice ----
+function aggregate(viz, results) {
+  const xAxis = viz.xAxis || (viz.source === "event" ? "category" : "ou");
+
+  if (xAxis === "ou") {
+    const categories = results.map(r => {
+      const total = r.rows.reduce((s, row) => s + (row.value || 0), 0);
+      return { label: r.orgUnit, value: Math.round(total * 100) / 100 };
+    });
+    return { categories };
+  }
+
+  const { field, labelField } = fieldNamesFor(xAxis);
+  const allRows = results.flatMap(r => r.rows);
+  return { categories: sumRowsByKey(allRows, field, labelField) };
+}
+
+// ---- build a {xLabels, series:[{label, data}]} matrix for stacked charts ----
+// xKey/seriesKey are the same vocabulary as xAxis ("ou"|"pe"|"dx"|"category")
+function buildMatrix(rows, xKey, seriesKey) {
+  const xF = fieldNamesFor(xKey);
+  const sF = fieldNamesFor(seriesKey);
+  const xMeta = new Map();      // key -> label
+  const seriesMeta = new Map(); // key -> label
+  const cellSums = new Map();   // "xKey|seriesKey" -> total
+
+  rows.forEach(row => {
+    const xVal = row[xF.field];
+    const sVal = row[sF.field];
+    if (xVal == null || sVal == null) return;
+    if (!xMeta.has(xVal)) xMeta.set(xVal, row[xF.labelField] || xVal);
+    if (!seriesMeta.has(sVal)) seriesMeta.set(sVal, row[sF.labelField] || sVal);
+    const cellKey = `${xVal}|${sVal}`;
+    cellSums.set(cellKey, (cellSums.get(cellKey) || 0) + (row.value || 0));
+  });
+
+  const xKeys = [...xMeta.keys()].sort();
+  const seriesKeys = [...seriesMeta.keys()].sort();
+
+  return {
+    xLabels: xKeys.map(k => xMeta.get(k)),
+    series: seriesKeys.map(sKey => ({
+      label: seriesMeta.get(sKey),
+      data: xKeys.map(xKey => Math.round((cellSums.get(`${xKey}|${sKey}`) || 0) * 100) / 100)
+    }))
+  };
+}
+
+function axisLabel(xAxis) {
+  if (xAxis === "pe") return "Period";
+  if (xAxis === "dx") return "Data item";
+  if (xAxis === "category") return "Category";
+  return "Org unit";
+}
+
+// ---- demo fallback (used when datastore/me.json aren't reachable) ----
+const DEMO_ORGUNIT_NAME = "Sundhara PHC";
+
+const DEMO_TABS = [
+  { id: "immunization", label: "Immunization" },
+  { id: "familyPlanning", label: "Family Planning" },
+  { id: "childHealth", label: "Child Health" }
+];
+
+const DEMO_VISUALIZATIONS_BY_TAB = {
+  immunization: [
+    { id: "imm-doses-by-type", label: "Vaccine Doses by Type (this year)", type: "bar", xAxis: "dx", unit: "doses" },
+    { id: "imm-bcg-trend", label: "BCG Doses — Monthly Trend", type: "line", xAxis: "pe", unit: "doses" },
+    { id: "imm-doses-stacked", label: "Vaccine Doses by Month, Stacked by Antigen", type: "stacked", xAxis: "pe", seriesField: "dx", unit: "doses" },
+    { id: "imm-penta3-coverage", label: "Penta3 Coverage", type: "scorecard", xAxis: "ou", unit: "%", target: 90 },
+    { id: "imm-doses-table", label: "Doses Given, All Antigens", type: "table", xAxis: "dx", unit: "doses" },
+    { id: "anc-ethnicity-pie", label: "ANC Clients by Ethnicity (this year)", type: "pie", source: "event", categoryField: "yifOETNxcrj", xAxis: "category", unit: "clients" }
+  ],
+  familyPlanning: [
+    { id: "fp-clients-by-method", label: "Clients by FP Method (this year)", type: "bar", xAxis: "dx", unit: "clients" },
+    { id: "fp-new-acceptors-trend", label: "New Acceptors — Monthly Trend", type: "line", xAxis: "pe", unit: "clients" },
+    { id: "fp-cpr", label: "Contraceptive Prevalence Rate", type: "scorecard", xAxis: "ou", unit: "%", target: 55 }
+  ],
+  childHealth: [
+    { id: "child-underweight-trend", label: "Underweight Children — Monthly Trend", type: "line", xAxis: "pe", unit: "children" },
+    { id: "child-ors-zinc", label: "ORS &amp; Zinc Given for Diarrhoea (this year)", type: "bar", xAxis: "dx", unit: "children" },
+    { id: "child-ebf-rate", label: "Exclusive Breastfeeding Rate (&lt;6mo)", type: "scorecard", xAxis: "ou", unit: "%", target: 70 }
+  ]
+};
+
+// deterministic pseudo-random in [0,1) so demo numbers are stable across refreshes
+function seededRandom(seed) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return (h % 10000) / 10000;
+}
+
+function buildDemoRows(vizId) {
+  if (vizId === "imm-doses-by-type" || vizId === "imm-doses-table") {
+    const antigens = [
+      { dx: "bcg", dxLabel: "BCG" }, { dx: "opv3", dxLabel: "OPV3" },
+      { dx: "penta3", dxLabel: "Penta3" }, { dx: "mr1", dxLabel: "Measles-Rubella 1" }
+    ];
+    const base = [420, 380, 400, 340];
+    return antigens.map((a, i) => ({ ...a, pe: "2026", peLabel: "2026", value: Math.round(base[i] * (0.7 + seededRandom(vizId + a.dx) * 0.6)) }));
+  }
+  if (vizId === "imm-bcg-trend") {
+    return Array.from({ length: 12 }, (_, m) => ({
+      pe: "2026" + String(m + 1).padStart(2, "0"), peLabel: "2026" + String(m + 1).padStart(2, "0"),
+      dx: "bcg", dxLabel: "BCG",
+      value: Math.round(30 + Math.sin(m / 2) * 8 + seededRandom(vizId + m) * 6)
+    }));
+  }
+  if (vizId === "imm-penta3-coverage") {
+    return [{ pe: "2026", peLabel: "2026", dx: "penta3cov", dxLabel: "Penta3 coverage", value: Math.round(70 + seededRandom(vizId) * 25) }];
+  }
+  if (vizId === "imm-doses-stacked") {
+    const antigens = [
+      { dx: "bcg", dxLabel: "BCG" }, { dx: "opv3", dxLabel: "OPV3" },
+      { dx: "penta3", dxLabel: "Penta3" }, { dx: "mr1", dxLabel: "Measles-Rubella 1" }
+    ];
+    const rows = [];
+    antigens.forEach((a, ai) => {
+      const base = 25 + ai * 6;
+      for (let m = 0; m < 12; m++) {
+        rows.push({
+          dx: a.dx, dxLabel: a.dxLabel,
+          pe: "2026" + String(m + 1).padStart(2, "0"), peLabel: "2026" + String(m + 1).padStart(2, "0"),
+          value: Math.round(base + Math.sin(m / 2 + ai) * 5 + seededRandom(vizId + a.dx + m) * 6)
+        });
+      }
+    });
+    return rows;
+  }
+  if (vizId === "anc-ethnicity-pie") {
+    // mirrors a real Event Visualizer response: category = an option-set
+    // dimension (e.g. "GEN - Ethnic Code"), one row per option, value = count
+    const groups = [
+      { category: "dalit", categoryLabel: "1 दलित (१)" },
+      { category: "janajati", categoryLabel: "2 जनजाती (२)" },
+      { category: "madhesi", categoryLabel: "3 मधेसी (३)" },
+      { category: "muslim", categoryLabel: "4 मुस्लिम (४)" },
+      { category: "brahminChhetri", categoryLabel: "5 ब्राह्मण/ क्षेत्री (५)" },
+      { category: "other", categoryLabel: "6 अन्य (६)" }
+    ];
+    return groups.map(g => ({ ...g, pe: "2026", peLabel: "2026", value: Math.round(5 + seededRandom(vizId + g.category) * 150) }));
+  }
+  if (vizId === "fp-clients-by-method") {
+    const methods = [
+      { dx: "condom", dxLabel: "Condoms" }, { dx: "pills", dxLabel: "Oral pills" },
+      { dx: "injectable", dxLabel: "Injectable" }, { dx: "implant", dxLabel: "Implant" }
+    ];
+    const base = [180, 140, 210, 90];
+    return methods.map((m, i) => ({ ...m, pe: "2026", peLabel: "2026", value: Math.round(base[i] * (0.7 + seededRandom(vizId + m.dx) * 0.6)) }));
+  }
+  if (vizId === "fp-new-acceptors-trend") {
+    return Array.from({ length: 12 }, (_, m) => ({
+      pe: "2026" + String(m + 1).padStart(2, "0"), peLabel: "2026" + String(m + 1).padStart(2, "0"),
+      dx: "newacceptors", dxLabel: "New acceptors",
+      value: Math.round(20 + Math.cos(m / 2) * 6 + seededRandom(vizId + m) * 5)
+    }));
+  }
+  if (vizId === "fp-cpr") {
+    return [{ pe: "2026", peLabel: "2026", dx: "cpr", dxLabel: "CPR", value: Math.round(40 + seededRandom(vizId) * 30) }];
+  }
+  if (vizId === "child-underweight-trend") {
+    return Array.from({ length: 12 }, (_, m) => ({
+      pe: "2026" + String(m + 1).padStart(2, "0"), peLabel: "2026" + String(m + 1).padStart(2, "0"),
+      dx: "underweight", dxLabel: "Underweight",
+      value: Math.round(8 + Math.sin(m / 3) * 3 + seededRandom(vizId + m) * 2)
+    }));
+  }
+  if (vizId === "child-ors-zinc") {
+    const items = [{ dx: "ors", dxLabel: "ORS" }, { dx: "zinc", dxLabel: "Zinc" }];
+    const base = [260, 240];
+    return items.map((it, i) => ({ ...it, pe: "2026", peLabel: "2026", value: Math.round(base[i] * (0.7 + seededRandom(vizId + it.dx) * 0.6)) }));
+  }
+  if (vizId === "child-ebf-rate") {
+    return [{ pe: "2026", peLabel: "2026", dx: "ebf", dxLabel: "EBF", value: Math.round(55 + seededRandom(vizId) * 35) }];
+  }
+  return [];
+}
+
+function fetchVizDemo(viz) {
+  return [{ orgUnit: DEMO_ORGUNIT_NAME, status: "ok", rows: buildDemoRows(viz.id) }];
+}
+
+// ---- Renderers ----
+// IMPORTANT: every render* function takes an already-attached `card` element
+// (the placeholder that's already in #dashboard) and populates it in place,
+// rather than building a brand new element off-DOM and swapping it in
+// afterward. Chart.js needs the canvas attached to the document BEFORE
+// `new Chart(...)` is called to correctly measure its size for
+// responsive/maintainAspectRatio — instantiating against a detached canvas
+// is a classic cause of "chart area renders blank, no console error".
+function renderBar(card, viz, agg) {
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · x-axis: ${viz.xAxis || "ou"}</div>
+    </div>
+    <div class="combined-chart-wrap"><canvas></canvas></div>
+  `;
+  new Chart(card.querySelector("canvas"), {
+    type: "bar",
+    data: {
+      labels: agg.categories.map(c => c.label),
+      datasets: [{ label: viz.label, data: agg.categories.map(c => c.value), backgroundColor: "#2c6693" }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, title: { display: true, text: viz.unit } } }
+    }
+  });
+}
+
+function renderLine(card, viz, agg) {
+  const summed = viz.xAxis === "pe" || viz.xAxis === "dx";
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · x-axis: ${viz.xAxis || "ou"}${summed ? " · summed across returned org unit(s)" : ""}</div>
+    </div>
+    <div class="combined-chart-wrap"><canvas></canvas></div>
+  `;
+  new Chart(card.querySelector("canvas"), {
+    type: "line",
+    data: {
+      labels: agg.categories.map(c => c.label),
+      datasets: [{
+        label: viz.label,
+        data: agg.categories.map(c => c.value),
+        borderColor: "#2c6693",
+        backgroundColor: "transparent",
+        pointRadius: 0,
+        tension: 0.25
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10 } },
+        y: { beginAtZero: true, title: { display: true, text: viz.unit } }
+      }
+    }
+  });
+}
+
+function renderTable(card, viz, agg) {
+  const rows = agg.categories.map(c => `
+    <tr>
+      <td><span class="status-badge status-ok"></span>${c.label}</td>
+      <td class="num">${c.value} ${viz.unit || ""}</td>
+    </tr>`).join("");
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · x-axis: ${viz.xAxis || "ou"}</div>
+    </div>
+    <table class="viz-table">
+      <thead><tr><th>${axisLabel(viz.xAxis)}</th><th style="text-align:right">Value</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderScorecards(card, viz, agg) {
+  const cells = agg.categories.map(c => {
+    const hasTarget = viz.target != null;
+    const metTarget = hasTarget && c.value >= viz.target;
+    const scoreColor = hasTarget ? (metTarget ? "var(--ok)" : "var(--warn)") : "var(--ink)";
+    return `
+      <div class="scorecard-cell">
+        <div class="cell-label"><span class="status-badge status-ok"></span>${c.label}</div>
+        <div class="score-value" style="color:${scoreColor}">${c.value}<span class="score-unit">${viz.unit || ""}</span></div>
+        ${hasTarget ? `<div class="score-target">target ${viz.target}${viz.unit || ""}</div>` : ""}
+      </div>`;
+  }).join("");
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id}${viz.target != null ? " · scorecard vs. target" : " · scorecard"}</div>
+    </div>
+    <div class="multiples-grid">${cells}</div>
+  `;
+}
+
+function renderPie(card, viz, agg) {
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · x-axis: ${viz.xAxis || (viz.source === "event" ? "category" : "ou")}</div>
+    </div>
+    <div class="combined-chart-wrap"><canvas></canvas></div>
+  `;
+  new Chart(card.querySelector("canvas"), {
+    type: viz.pieStyle === "doughnut" ? "doughnut" : "pie",
+    data: {
+      labels: agg.categories.map(c => c.label),
+      datasets: [{ data: agg.categories.map(c => c.value), backgroundColor: agg.categories.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]) }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: true, position: "right", labels: { boxWidth: 12, font: { size: 11 } } } }
+    }
+  });
+}
+
+function renderStacked(card, viz, results) {
+  const xKey = viz.xAxis || "pe";
+  const seriesKey = viz.seriesField || (viz.source === "event" ? "category" : "dx");
+  const allRows = results.flatMap(r => r.rows);
+  const matrix = buildMatrix(allRows, xKey, seriesKey);
+
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · stacked, x-axis: ${xKey}, series: ${seriesKey}</div>
+    </div>
+    <div class="combined-chart-wrap"><canvas></canvas></div>
+  `;
+  new Chart(card.querySelector("canvas"), {
+    type: "bar",
+    data: {
+      labels: matrix.xLabels,
+      datasets: matrix.series.map((s, i) => ({
+        label: s.label,
+        data: s.data,
+        backgroundColor: CHART_PALETTE[i % CHART_PALETTE.length]
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: true, position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        x: { stacked: true, ticks: { maxTicksLimit: 12 } },
+        y: { stacked: true, beginAtZero: true, title: { display: !!viz.unit, text: viz.unit } }
+      }
+    }
+  });
+}
+
+function renderSmallMultiples(card, viz, results) {
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · small multiples</div>
+    </div>
+    <div class="multiples-grid"></div>
+  `;
+  const grid = card.querySelector(".multiples-grid");
+  results.forEach(r => {
+    const cell = document.createElement("div");
+    cell.className = "multiple-cell";
+    if (!r.rows.length) {
+      cell.innerHTML = `<div class="cell-label"><span class="status-badge status-timeout"></span>${r.orgUnit}</div><div class="cell-error">No data</div>`;
+      grid.appendChild(cell);
+      return;
+    }
+    const sorted = [...r.rows].sort((a, b) => String(a.pe).localeCompare(String(b.pe)));
+    cell.innerHTML = `<div class="cell-label"><span class="status-badge status-ok"></span>${r.orgUnit}</div><canvas></canvas>`;
+    grid.appendChild(cell);
+    new Chart(cell.querySelector("canvas"), {
+      type: "line",
+      data: { labels: sorted.map((_, i) => i + 1), datasets: [{ data: sorted.map(row => row.value), borderColor: "#2c6693", pointRadius: 0, tension: 0.3 }] },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
+    });
+  });
+}
+
+function renderOrgUnitGrid(card, viz, results) {
+  const chartStyle = viz.chartStyle === "line" ? "line" : "bar";
+  const keyField = viz.xAxis === "dx" ? "dx" : "pe";
+  const labelField = keyField === "dx" ? "dxLabel" : "peLabel";
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · per-org-unit ${chartStyle} chart, x-axis: ${keyField}</div>
+    </div>
+    <div class="orgunit-grid"></div>
+  `;
+  const grid = card.querySelector(".orgunit-grid");
+  results.forEach(r => {
+    const cell = document.createElement("div");
+    cell.className = "orgunit-grid-cell";
+    if (!r.rows.length) {
+      cell.innerHTML = `<div class="cell-label"><span class="status-badge status-timeout"></span>${r.orgUnit}</div><div class="cell-error">No data</div>`;
+      grid.appendChild(cell);
+      return;
+    }
+    const points = sumRowsByKey(r.rows, keyField, labelField);
+    cell.innerHTML = `<div class="cell-label"><span class="status-badge status-ok"></span>${r.orgUnit}</div><div class="orgunit-chart-wrap"><canvas></canvas></div>`;
+    grid.appendChild(cell);
+    new Chart(cell.querySelector("canvas"), {
+      type: chartStyle,
+      data: {
+        labels: points.map(p => p.label),
+        datasets: [{ data: points.map(p => p.value), backgroundColor: chartStyle === "bar" ? "#2c6693" : "transparent", borderColor: "#2c6693", pointRadius: 0, tension: 0.25 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+        scales: { x: { ticks: { maxTicksLimit: 6, font: { size: 9 } } }, y: { beginAtZero: true, ticks: { font: { size: 9 } }, title: { display: !!viz.unit, text: viz.unit, font: { size: 9 } } } }
+      }
+    });
+  });
+}
+
+function cardFor(card, viz, results) {
+  if (viz.type === "small-multiples") return renderSmallMultiples(card, viz, results);
+  if (viz.type === "orgunit-grid") return renderOrgUnitGrid(card, viz, results);
+  if (viz.type === "stacked") return renderStacked(card, viz, results);
+  const agg = aggregate(viz, results);
+  if (viz.type === "bar") return renderBar(card, viz, agg);
+  if (viz.type === "line") return renderLine(card, viz, agg);
+  if (viz.type === "pie") return renderPie(card, viz, agg);
+  if (viz.type === "scorecard") return renderScorecards(card, viz, agg);
+  return renderTable(card, viz, agg);
+}
+
+function loadingCard(viz) {
+  const card = document.createElement("div");
+  card.className = "viz-card";
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · loading…</div>
+    </div>
+    <div class="cell-error" style="color:var(--muted)">Fetching…</div>
+  `;
+  return card;
+}
+
+// ---- app state ----
+let tabs = [];
+let activeTabId = null;
+let usingDemo = false;
+const tabConfigCache = new Map();
+
+const tabBar = document.getElementById("tabBar");
+const dashboard = document.getElementById("dashboard");
+const banner = document.getElementById("demoBanner");
+
+function renderTabs() {
+  tabBar.innerHTML = tabs.map(t =>
+    `<button class="tab-btn ${t.id === activeTabId ? "active" : ""}" data-tab="${t.id}">${t.label}</button>`
+  ).join("");
+  tabBar.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activeTabId = btn.dataset.tab;
+      renderTabs();
+      loadAndRenderActiveTab();
+    });
+  });
+}
+
+async function loadTabConfig(tab) {
+  if (tabConfigCache.has(tab.id)) return tabConfigCache.get(tab.id);
+  let config;
+  if (usingDemo) {
+    config = { visualizations: DEMO_VISUALIZATIONS_BY_TAB[tab.id] || [] };
+  } else {
+    try {
+      const raw = await fetchDatastoreKey(tab.key);
+      // Accept either { "visualizations": [...] } or a bare array of visualizations.
+      const visualizations = Array.isArray(raw) ? raw
+        : (raw && Array.isArray(raw.visualizations)) ? raw.visualizations
+        : null;
+      if (!visualizations) throw new Error(`key "${tab.key}" has no visualizations array`);
+      config = { visualizations };
+    } catch (e) {
+      console.warn(`Falling back to demo visualizations for tab "${tab.id}":`, e.message);
+      config = { visualizations: DEMO_VISUALIZATIONS_BY_TAB[tab.id] || [] };
+    }
+  }
+  tabConfigCache.set(tab.id, config);
+  return config;
+}
+
+async function loadAndRenderActiveTab() {
+  const tab = tabs.find(t => t.id === activeTabId);
+  dashboard.innerHTML = "";
+  if (!tab) return;
+
+  const config = await loadTabConfig(tab);
+  for (const viz of config.visualizations) {
+    const card = loadingCard(viz);
+    dashboard.appendChild(card); // attach FIRST — canvases must be in the DOM before Chart.js sizes them
+    try {
+      const results = usingDemo ? fetchVizDemo(viz) : await fetchViz(viz);
+      cardFor(card, viz, results); // populates the already-attached `card` in place
+    } catch (e) {
+      card.innerHTML = `
+        <div class="viz-card-header">
+          <div class="viz-title">${viz.label}</div>
+          <div class="viz-meta">${viz.id} · failed to load</div>
+        </div>
+        <div class="cell-error" style="color:var(--err)">Error: ${e.message}</div>
+      `;
+    }
+  }
+  document.getElementById("lastRefreshed").textContent = "Last refreshed: " + new Date().toLocaleTimeString();
+}
+
+async function refreshAll() {
+  tabConfigCache.clear();
+  await loadAndRenderActiveTab();
+}
+
+async function start() {
+  try {
+    const name = await fetchUserOrgUnitName();
+    if (!name) throw new Error("no organisation unit assigned to this user");
+    document.getElementById("ouName").textContent = name;
+  } catch (e) {
+    console.warn("Falling back to demo org unit name:", e.message);
+    document.getElementById("ouName").textContent = DEMO_ORGUNIT_NAME + " (demo)";
+  }
+
+  try {
+    const tabsConfig = await fetchDatastoreKey(TABS_KEY);
+    // Accept either a bare array, or a { "tabs": [...] } wrapper — both are
+    // easy to end up with depending on how the key was POSTed/PUT.
+    const tabsArray = Array.isArray(tabsConfig) ? tabsConfig
+      : (tabsConfig && Array.isArray(tabsConfig.tabs)) ? tabsConfig.tabs
+      : null;
+    if (!tabsArray || !tabsArray.length) throw new Error("no tabs configured");
+    usingDemo = false;
+    tabs = tabsArray;
+  } catch (e) {
+    console.warn("Falling back to demo tabs:", e.message);
+    usingDemo = true;
+    tabs = DEMO_TABS;
+  }
+  banner.style.display = usingDemo ? "block" : "none";
+
+  activeTabId = tabs[0].id;
+  renderTabs();
+  await loadAndRenderActiveTab();
+}
+
+start();
+</script>
+</body>
+</html>
