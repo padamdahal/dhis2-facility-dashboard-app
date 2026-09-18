@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>ePHC Dashboard</title>
+<title>ePHC Dashboard — My Facility</title>
 <script src="chart.umd.js"></script>
 <style>
   :root {--ink: #1c2a33;--muted: #5c6b74;--line: #e1e6e9;--bg: #f6f8f9;--card: #ffffff;--accent: #2c6693;--ok: #2e8b57;--err: #c0392b;
@@ -87,15 +87,11 @@
 
 <header>
   <div class="title-group">
-    <h1>ePHC Dashboard</h1>
+    <h1>ePHC Dashboard — My Facility</h1>
     <div class="sub" id="lastRefreshed">Loading…</div>
     <div class="ou-name" id="ouName"></div>
   </div>
-  <div>
-  <a class="refresh-btn" href="../../apps/capture#/?programId=kvottqqHM1j" style="text-decoration:none">Capture App</a>
-  <a class="refresh-btn" href="../../apps/e-record#/?programId=kvottqqHM1j" style="text-decoration:none">eRecord App</a>
   <button class="refresh-btn" onclick="refreshAll()">Refresh all</button>
-  </div>
 </header>
 
 <div class="tab-bar" id="tabBar"></div>
@@ -132,8 +128,11 @@ namespace: facilityDashboard
       {
         "id": "bcg-doses",
         "label": "BCG Doses Given (this year)",
-        "type": "bar",           // bar | line | table | scorecard | small-multiples | orgunit-grid
-        "xAxis": "pe",            // ou | pe | dx  (default: "ou")
+        "type": "bar",           // bar | line | pie | stacked | table | scorecard | small-multiples | orgunit-grid
+        "source": "aggregate",    // "aggregate" (default) | "event" — which analytics endpoint/response shape dataUrl returns
+        "xAxis": "pe",            // aggregate: ou | pe | dx (default "ou") · event: category | pe (default "category")
+        "seriesField": "dx",      // stacked only: which field becomes the stacked segments (ou|pe|dx for aggregate, category|pe for event)
+        "categoryField": "yifOETNxcrj", // event only: header/dimension UID holding the breakdown value; omit to auto-detect
         "dataUrl": "analytics.json?dimension=dx:xxxx&dimension=pe:THIS_YEAR&dimension=ou:USER_ORGUNIT",
         "unit": "doses",
         "target": 80              // optional, scorecard only
@@ -153,11 +152,46 @@ assigned to. This app never needs to know the user's org unit id, level,
 or hierarchy position — it only fetches /api/me.json once, to show the
 org unit's name in the header.
 
-xAxis keeps its usual meaning:
-"ou" — one category per org unit returned (normally just the user's own;
-       more than one only if USER_ORGUNIT_CHILDREN/GRANDCHILDREN is used)
-"pe" — one category per period, summed across whatever org unit(s) came back
-"dx" — one category per data item, summed across whatever org unit(s) came back
+TWO DATA SOURCES per visualization ("source" field, default "aggregate"):
+
+  "aggregate" — the regular analytics.json endpoint (dx/pe/ou/value rows),
+  same as v1. xAxis meaning:
+    "ou" — one category per org unit returned (normally just the user's
+           own; more than one only if USER_ORGUNIT_CHILDREN/GRANDCHILDREN)
+    "pe" — one category per period, summed across returned org unit(s)
+    "dx" — one category per data item, summed across returned org unit(s)
+
+  "event" — the Event Visualizer endpoint,
+  analytics/events/aggregate/<program>.json?dimension=<UID>&dimension=pe:...
+  &filter=ou:USER_ORGUNIT&stage=<UID>&displayProperty=NAME&outputType=EVENT
+  &sortOrder=DESC&outputIdScheme=NAME
+  Its response has one header column per requested dimension (named by
+  UID, e.g. a tracked-entity-attribute or data element UID like a "GEN -
+  Ethnic Code" option-set field) instead of fixed dx/pe/ou columns, plus
+  "pe" and "value". "categoryField" tells this app which header holds
+  that breakdown value ("yifOETNxcrj" in the example above); if omitted,
+  the first header that isn't "pe"/"value"/"ou" is used automatically.
+  xAxis meaning:
+    "category" (default) — one category per breakdown value (e.g. per
+                ethnicity), summed across periods
+    "pe"       — one category per period, summed across breakdown values
+  ou is a "filter", not a "dimension", for event queries (a single fixed
+  org unit, same USER_ORGUNIT-driven pattern as aggregate queries) so it
+  never appears as its own header/category here.
+
+CHART TYPES: bar/line/table/scorecard/small-multiples/orgunit-grid work
+exactly as in v1, for either source. Two additions, also source-agnostic:
+  "pie"     — one slice per category (from the same xAxis/categories
+              aggregate() already produces for bar/line/table). Optional
+              "pieStyle": "pie" (default) or "doughnut".
+  "stacked" — a stacked bar chart needing TWO fields instead of one:
+              "xAxis" (the groups along the bottom) and "seriesField"
+              (what gets stacked within each group), e.g. xAxis:"pe" +
+              seriesField:"dx" for "doses per month, stacked by antigen",
+              or xAxis:"pe" + seriesField:"category" for "ANC clients per
+              month, stacked by ethnicity". Defaults to xAxis:"pe" +
+              seriesField: "dx" (aggregate) / "category" (event) if
+              unspecified.
 ****************************************************/
 const DATASTORE_NAMESPACE = "facilityDashboard";
 const TABS_KEY = "tabs";
@@ -167,6 +201,8 @@ async function fetchDatastoreKey(key) {
   if (!res.ok) throw new Error(`datastore ${key} ${res.status}`);
   return await res.json();
 }
+
+const CHART_PALETTE = ["#2c6693", "#5b9bd5", "#7cb9e8", "#3d8361", "#e07a5f", "#f2cc8f", "#81b29a", "#b56576", "#9c89b8", "#f4a261"];
 
 async function fetchUserOrgUnitName() {
   const res = await fetch(`../../../api/me.json?fields=organisationUnits[name]`);
@@ -195,7 +231,40 @@ function parseAnalyticsRows(json) {
   }));
 }
 
-// ---- group a single analytics response's rows into per-org-unit buckets ----
+// ---- Event Visualizer row parser: analytics/events/aggregate/<program>.json ----
+// Headers here are named by dimension UID (e.g. a TEA/data element like
+// "yifOETNxcrj") instead of fixed dx/pe/ou columns, plus "pe" and "value".
+// ou is a filter (single fixed org unit), so it never appears as a header.
+function parseEventAnalyticsRows(json, categoryField) {
+  const headers = json.headers || [];
+  const items = (json.metaData && json.metaData.items) || {};
+  const labelOf = code => (items[code] && items[code].name) || code;
+
+  const valueIdx = headers.findIndex(h => h.name === "value");
+  const peIdx = headers.findIndex(h => h.name === "pe");
+  let catIdx = categoryField != null ? headers.findIndex(h => h.name === categoryField) : -1;
+  if (catIdx === -1) {
+    catIdx = headers.findIndex(h => h.name !== "pe" && h.name !== "value" && h.name !== "ou");
+  }
+
+  return (json.rows || []).map(r => ({
+    category: catIdx > -1 ? r[catIdx] : null,
+    categoryLabel: catIdx > -1 ? labelOf(r[catIdx]) : null,
+    pe: peIdx > -1 ? r[peIdx] : null,
+    peLabel: peIdx > -1 ? labelOf(r[peIdx]) : null,
+    value: valueIdx > -1 ? parseFloat(r[valueIdx]) : null
+  }));
+}
+
+// ---- maps an xAxis/seriesField key to the row field names that hold it ----
+function fieldNamesFor(key) {
+  if (key === "pe") return { field: "pe", labelField: "peLabel" };
+  if (key === "dx") return { field: "dx", labelField: "dxLabel" };
+  if (key === "ou") return { field: "ou", labelField: "ouLabel" };
+  return { field: "category", labelField: "categoryLabel" }; // "category" (event source)
+}
+
+
 // (normally resolves to just one bucket — the user's own org unit — but
 // stays generic in case a viz uses USER_ORGUNIT_CHILDREN/GRANDCHILDREN)
 function groupRowsByOu(rows) {
@@ -208,11 +277,15 @@ function groupRowsByOu(rows) {
   return [...map.values()].sort((a, b) => a.orgUnit.localeCompare(b.orgUnit));
 }
 
-// ---- fetch one visualization; dataUrl already has ou:USER_ORGUNIT baked in ----
+// ---- fetch one visualization; dataUrl already has ou:USER_ORGUNIT (or filter=ou:USER_ORGUNIT) baked in ----
 async function fetchViz(viz) {
   const res = await fetch(`../../../api/${viz.dataUrl}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
+  if (viz.source === "event") {
+    const rows = parseEventAnalyticsRows(json, viz.categoryField);
+    return [{ orgUnit: "Selected org unit", status: "ok", rows }];
+  }
   return groupRowsByOu(parseAnalyticsRows(json));
 }
 
@@ -234,7 +307,7 @@ function sumRowsByKey(rows, keyField, labelField) {
 
 // ---- turn per-org-unit rows into chart-ready categories, per xAxis choice ----
 function aggregate(viz, results) {
-  const xAxis = viz.xAxis || "ou";
+  const xAxis = viz.xAxis || (viz.source === "event" ? "category" : "ou");
 
   if (xAxis === "ou") {
     const categories = results.map(r => {
@@ -244,20 +317,51 @@ function aggregate(viz, results) {
     return { categories };
   }
 
-  const keyField = xAxis === "pe" ? "pe" : "dx";
-  const labelField = xAxis === "pe" ? "peLabel" : "dxLabel";
+  const { field, labelField } = fieldNamesFor(xAxis);
   const allRows = results.flatMap(r => r.rows);
-  return { categories: sumRowsByKey(allRows, keyField, labelField) };
+  return { categories: sumRowsByKey(allRows, field, labelField) };
+}
+
+// ---- build a {xLabels, series:[{label, data}]} matrix for stacked charts ----
+// xKey/seriesKey are the same vocabulary as xAxis ("ou"|"pe"|"dx"|"category")
+function buildMatrix(rows, xKey, seriesKey) {
+  const xF = fieldNamesFor(xKey);
+  const sF = fieldNamesFor(seriesKey);
+  const xMeta = new Map();      // key -> label
+  const seriesMeta = new Map(); // key -> label
+  const cellSums = new Map();   // "xKey|seriesKey" -> total
+
+  rows.forEach(row => {
+    const xVal = row[xF.field];
+    const sVal = row[sF.field];
+    if (xVal == null || sVal == null) return;
+    if (!xMeta.has(xVal)) xMeta.set(xVal, row[xF.labelField] || xVal);
+    if (!seriesMeta.has(sVal)) seriesMeta.set(sVal, row[sF.labelField] || sVal);
+    const cellKey = `${xVal}|${sVal}`;
+    cellSums.set(cellKey, (cellSums.get(cellKey) || 0) + (row.value || 0));
+  });
+
+  const xKeys = [...xMeta.keys()].sort();
+  const seriesKeys = [...seriesMeta.keys()].sort();
+
+  return {
+    xLabels: xKeys.map(k => xMeta.get(k)),
+    series: seriesKeys.map(sKey => ({
+      label: seriesMeta.get(sKey),
+      data: xKeys.map(xKey => Math.round((cellSums.get(`${xKey}|${sKey}`) || 0) * 100) / 100)
+    }))
+  };
 }
 
 function axisLabel(xAxis) {
   if (xAxis === "pe") return "Period";
   if (xAxis === "dx") return "Data item";
+  if (xAxis === "category") return "Category";
   return "Org unit";
 }
 
 // ---- demo fallback (used when datastore/me.json aren't reachable) ----
-/*const DEMO_ORGUNIT_NAME = "Sundhara PHC";
+const DEMO_ORGUNIT_NAME = "Sundhara PHC";
 
 const DEMO_TABS = [
   { id: "immunization", label: "Immunization" },
@@ -269,8 +373,10 @@ const DEMO_VISUALIZATIONS_BY_TAB = {
   immunization: [
     { id: "imm-doses-by-type", label: "Vaccine Doses by Type (this year)", type: "bar", xAxis: "dx", unit: "doses" },
     { id: "imm-bcg-trend", label: "BCG Doses — Monthly Trend", type: "line", xAxis: "pe", unit: "doses" },
+    { id: "imm-doses-stacked", label: "Vaccine Doses by Month, Stacked by Antigen", type: "stacked", xAxis: "pe", seriesField: "dx", unit: "doses" },
     { id: "imm-penta3-coverage", label: "Penta3 Coverage", type: "scorecard", xAxis: "ou", unit: "%", target: 90 },
-    { id: "imm-doses-table", label: "Doses Given, All Antigens", type: "table", xAxis: "dx", unit: "doses" }
+    { id: "imm-doses-table", label: "Doses Given, All Antigens", type: "table", xAxis: "dx", unit: "doses" },
+    { id: "anc-ethnicity-pie", label: "ANC Clients by Ethnicity (this year)", type: "pie", source: "event", categoryField: "yifOETNxcrj", xAxis: "category", unit: "clients" }
   ],
   familyPlanning: [
     { id: "fp-clients-by-method", label: "Clients by FP Method (this year)", type: "bar", xAxis: "dx", unit: "clients" },
@@ -310,6 +416,37 @@ function buildDemoRows(vizId) {
   if (vizId === "imm-penta3-coverage") {
     return [{ pe: "2026", peLabel: "2026", dx: "penta3cov", dxLabel: "Penta3 coverage", value: Math.round(70 + seededRandom(vizId) * 25) }];
   }
+  if (vizId === "imm-doses-stacked") {
+    const antigens = [
+      { dx: "bcg", dxLabel: "BCG" }, { dx: "opv3", dxLabel: "OPV3" },
+      { dx: "penta3", dxLabel: "Penta3" }, { dx: "mr1", dxLabel: "Measles-Rubella 1" }
+    ];
+    const rows = [];
+    antigens.forEach((a, ai) => {
+      const base = 25 + ai * 6;
+      for (let m = 0; m < 12; m++) {
+        rows.push({
+          dx: a.dx, dxLabel: a.dxLabel,
+          pe: "2026" + String(m + 1).padStart(2, "0"), peLabel: "2026" + String(m + 1).padStart(2, "0"),
+          value: Math.round(base + Math.sin(m / 2 + ai) * 5 + seededRandom(vizId + a.dx + m) * 6)
+        });
+      }
+    });
+    return rows;
+  }
+  if (vizId === "anc-ethnicity-pie") {
+    // mirrors a real Event Visualizer response: category = an option-set
+    // dimension (e.g. "GEN - Ethnic Code"), one row per option, value = count
+    const groups = [
+      { category: "dalit", categoryLabel: "1 दलित (१)" },
+      { category: "janajati", categoryLabel: "2 जनजाती (२)" },
+      { category: "madhesi", categoryLabel: "3 मधेसी (३)" },
+      { category: "muslim", categoryLabel: "4 मुस्लिम (४)" },
+      { category: "brahminChhetri", categoryLabel: "5 ब्राह्मण/ क्षेत्री (५)" },
+      { category: "other", categoryLabel: "6 अन्य (६)" }
+    ];
+    return groups.map(g => ({ ...g, pe: "2026", peLabel: "2026", value: Math.round(5 + seededRandom(vizId + g.category) * 150) }));
+  }
   if (vizId === "fp-clients-by-method") {
     const methods = [
       { dx: "condom", dxLabel: "Condoms" }, { dx: "pills", dxLabel: "Oral pills" },
@@ -348,12 +485,17 @@ function buildDemoRows(vizId) {
 
 function fetchVizDemo(viz) {
   return [{ orgUnit: DEMO_ORGUNIT_NAME, status: "ok", rows: buildDemoRows(viz.id) }];
-}*/
+}
 
 // ---- Renderers ----
-function renderBar(viz, agg) {
-  const card = document.createElement("div");
-  card.className = "viz-card";
+// IMPORTANT: every render* function takes an already-attached `card` element
+// (the placeholder that's already in #dashboard) and populates it in place,
+// rather than building a brand new element off-DOM and swapping it in
+// afterward. Chart.js needs the canvas attached to the document BEFORE
+// `new Chart(...)` is called to correctly measure its size for
+// responsive/maintainAspectRatio — instantiating against a detached canvas
+// is a classic cause of "chart area renders blank, no console error".
+function renderBar(card, viz, agg) {
   card.innerHTML = `
     <div class="viz-card-header">
       <div class="viz-title">${viz.label}</div>
@@ -374,12 +516,9 @@ function renderBar(viz, agg) {
       scales: { y: { beginAtZero: true, title: { display: true, text: viz.unit } } }
     }
   });
-  return card;
 }
 
-function renderLine(viz, agg) {
-  const card = document.createElement("div");
-  card.className = "viz-card";
+function renderLine(card, viz, agg) {
   const summed = viz.xAxis === "pe" || viz.xAxis === "dx";
   card.innerHTML = `
     <div class="viz-card-header">
@@ -411,12 +550,9 @@ function renderLine(viz, agg) {
       }
     }
   });
-  return card;
 }
 
-function renderTable(viz, agg) {
-  const card = document.createElement("div");
-  card.className = "viz-card";
+function renderTable(card, viz, agg) {
   const rows = agg.categories.map(c => `
     <tr>
       <td><span class="status-badge status-ok"></span>${c.label}</td>
@@ -432,12 +568,9 @@ function renderTable(viz, agg) {
       <tbody>${rows}</tbody>
     </table>
   `;
-  return card;
 }
 
-function renderScorecards(viz, agg) {
-  const card = document.createElement("div");
-  card.className = "viz-card";
+function renderScorecards(card, viz, agg) {
   const cells = agg.categories.map(c => {
     const hasTarget = viz.target != null;
     const metTarget = hasTarget && c.value >= viz.target;
@@ -456,12 +589,66 @@ function renderScorecards(viz, agg) {
     </div>
     <div class="multiples-grid">${cells}</div>
   `;
-  return card;
 }
 
-function renderSmallMultiples(viz, results) {
-  const card = document.createElement("div");
-  card.className = "viz-card";
+function renderPie(card, viz, agg) {
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · x-axis: ${viz.xAxis || (viz.source === "event" ? "category" : "ou")}</div>
+    </div>
+    <div class="combined-chart-wrap"><canvas></canvas></div>
+  `;
+  new Chart(card.querySelector("canvas"), {
+    type: viz.pieStyle === "doughnut" ? "doughnut" : "pie",
+    data: {
+      labels: agg.categories.map(c => c.label),
+      datasets: [{ data: agg.categories.map(c => c.value), backgroundColor: agg.categories.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]) }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: true, position: "right", labels: { boxWidth: 12, font: { size: 11 } } } }
+    }
+  });
+}
+
+function renderStacked(card, viz, results) {
+  const xKey = viz.xAxis || "pe";
+  const seriesKey = viz.seriesField || (viz.source === "event" ? "category" : "dx");
+  const allRows = results.flatMap(r => r.rows);
+  const matrix = buildMatrix(allRows, xKey, seriesKey);
+
+  card.innerHTML = `
+    <div class="viz-card-header">
+      <div class="viz-title">${viz.label}</div>
+      <div class="viz-meta">${viz.id} · stacked, x-axis: ${xKey}, series: ${seriesKey}</div>
+    </div>
+    <div class="combined-chart-wrap"><canvas></canvas></div>
+  `;
+  new Chart(card.querySelector("canvas"), {
+    type: "bar",
+    data: {
+      labels: matrix.xLabels,
+      datasets: matrix.series.map((s, i) => ({
+        label: s.label,
+        data: s.data,
+        backgroundColor: CHART_PALETTE[i % CHART_PALETTE.length]
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: true, position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        x: { stacked: true, ticks: { maxTicksLimit: 12 } },
+        y: { stacked: true, beginAtZero: true, title: { display: !!viz.unit, text: viz.unit } }
+      }
+    }
+  });
+}
+
+function renderSmallMultiples(card, viz, results) {
   card.innerHTML = `
     <div class="viz-card-header">
       <div class="viz-title">${viz.label}</div>
@@ -487,12 +674,9 @@ function renderSmallMultiples(viz, results) {
       options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
     });
   });
-  return card;
 }
 
-function renderOrgUnitGrid(viz, results) {
-  const card = document.createElement("div");
-  card.className = "viz-card";
+function renderOrgUnitGrid(card, viz, results) {
   const chartStyle = viz.chartStyle === "line" ? "line" : "bar";
   const keyField = viz.xAxis === "dx" ? "dx" : "pe";
   const labelField = keyField === "dx" ? "dxLabel" : "peLabel";
@@ -527,17 +711,18 @@ function renderOrgUnitGrid(viz, results) {
       }
     });
   });
-  return card;
 }
 
-function cardFor(viz, results) {
-  if (viz.type === "small-multiples") return renderSmallMultiples(viz, results);
-  if (viz.type === "orgunit-grid") return renderOrgUnitGrid(viz, results);
+function cardFor(card, viz, results) {
+  if (viz.type === "small-multiples") return renderSmallMultiples(card, viz, results);
+  if (viz.type === "orgunit-grid") return renderOrgUnitGrid(card, viz, results);
+  if (viz.type === "stacked") return renderStacked(card, viz, results);
   const agg = aggregate(viz, results);
-  if (viz.type === "bar") return renderBar(viz, agg);
-  if (viz.type === "line") return renderLine(viz, agg);
-  if (viz.type === "scorecard") return renderScorecards(viz, agg);
-  return renderTable(viz, agg);
+  if (viz.type === "bar") return renderBar(card, viz, agg);
+  if (viz.type === "line") return renderLine(card, viz, agg);
+  if (viz.type === "pie") return renderPie(card, viz, agg);
+  if (viz.type === "scorecard") return renderScorecards(card, viz, agg);
+  return renderTable(card, viz, agg);
 }
 
 function loadingCard(viz) {
@@ -606,18 +791,22 @@ async function loadAndRenderActiveTab() {
 
   const config = await loadTabConfig(tab);
   for (const viz of config.visualizations) {
-    const placeholder = loadingCard(viz);
-    dashboard.appendChild(placeholder);
+    const card = loadingCard(viz);
+    dashboard.appendChild(card); // attach FIRST — canvases must be in the DOM before Chart.js sizes them
     try {
       const results = usingDemo ? fetchVizDemo(viz) : await fetchViz(viz);
-      placeholder.replaceWith(cardFor(viz, results));
+      cardFor(card, viz, results); // populates the already-attached `card` in place
     } catch (e) {
-      placeholder.querySelector(".viz-meta").textContent = `${viz.id} · failed to load`;
-      placeholder.querySelector(".cell-error").textContent = `Error: ${e.message}`;
-      placeholder.querySelector(".cell-error").style.color = "var(--err)";
+      card.innerHTML = `
+        <div class="viz-card-header">
+          <div class="viz-title">${viz.label}</div>
+          <div class="viz-meta">${viz.id} · failed to load</div>
+        </div>
+        <div class="cell-error" style="color:var(--err)">Error: ${e.message}</div>
+      `;
     }
   }
-  document.getElementById("lastRefreshed").textContent = `Last Updated: ${String(new Date().getHours()).padStart(2, '0')}:00`; //new Date().toLocaleTimeString();
+  document.getElementById("lastRefreshed").textContent = "Last refreshed: " + new Date().toLocaleTimeString();
 }
 
 async function refreshAll() {
